@@ -17,6 +17,20 @@ LedControl lc=LedControl(12,11,10,1);
 /* we always wait a bit between updates of the display */
 unsigned long delaytime=1000;
 
+const byte kidsAwoken = 0;
+const byte kidsGoingToBed = 1;
+const byte kidsSleeping = 2;
+const byte kidsWakingUp = 3;
+
+const byte Sunday =1;
+const byte Monday = 2;
+const byte Tuesday=3;
+const byte Wednesday=4;
+const byte Thursday=5;
+const byte Friday=6;
+const byte Saturday=7;
+
+
 void setDS3231time(byte second, byte minute, byte hour, byte dayOfWeek, byte
 dayOfMonth, byte month, byte year)
 {
@@ -149,15 +163,6 @@ void display(const byte* picture, int delayTime) {
   delay(delayTime);
 }
 
-/*const byte moon[]={ B00111100,
-                    B01110000,
-                    B11100000,
-                    B11100000,
-                    B11100000,
-                    B11110001,
-                    B01111110,
-                    B00111100};*/
-
 const byte moon[]={ B00111100,
                     B01111110,
                     B11111111,
@@ -179,16 +184,6 @@ byte sun[]={
                 B11111111,
                 B11111111};
 
-/*byte smiley[]={ 
-                B00000000,
-                B00000000,
-                B01100110,
-                B00000000,
-                B00000000,
-                B00111110,
-                B00011100,
-                B00000000};*/
-
 byte smiley[]={ 
                 B00000000,
                 B00000100,
@@ -204,7 +199,6 @@ void moveDown(const byte* glyph, byte count) {
   memcpy(settingGlyph, glyph, count);
 
   for (int i = 0; i < count; ++i) {
-    lc.setIntensity(0,(count - i) * 2 - 1);    
     display(settingGlyph, 1000);
     // shift one row down
     for (int j = count - 1; j >= 0; --j)
@@ -218,7 +212,6 @@ void moveUp(const byte* glyph, byte count) {
   memset(risingGlyph, 0, count);
 
   for (int i = count - 1; i >= 0; --i) {
-    lc.setIntensity(0,(count - i) * 2 - 1);    
     display(risingGlyph, 1000);
     // shift one row up
     for (int j = 0; j < count; ++j)
@@ -227,40 +220,63 @@ void moveUp(const byte* glyph, byte count) {
   display(risingGlyph, 1000);
 }
 
+byte getKidsState() {
+  byte second, minute, hour, dayOfWeek, dayOfMonth, month, year;
+  // retrieve data from DS3231
+  readDS3231time(&second, &minute, &hour, &dayOfWeek, &dayOfMonth, &month, &year);
+  
+  byte goingToBedHour = 20;
+  byte goingToBedMin = 00;
+  byte sleepingHour = 20;
+  byte sleepingMin = 20;
+  
+  byte wakingUpHour = 7;
+  byte wakingUpMin = 00;
+  byte awokenHour = 7;
+  byte awokenMin = 30;
+  if (dayOfWeek == Saturday || dayOfWeek == Sunday) {
+    wakingUpHour = 8;
+    wakingUpMin = 0;
+    awokenHour = 8;
+    awokenMin = 30;
+  }
+  
+  // Assumptions :
+  // - kids are sleeping at midnight 
+  // - kidsWakingUpTime < kidsAwokenTime < kidsGoingToBedTime < kidsSleepingTime
+  if (hour > sleepingHour || (hour == sleepingHour && minute > sleepingMin) || (hour < wakingUpHour) || (hour == wakingUpHour && minute < wakingUpMin))
+    return kidsSleeping;
+    
+  if (hour > goingToBedHour || (hour == goingToBedHour && minute > goingToBedMin))
+    return kidsGoingToBed;
+
+  if (hour > awokenHour || (hour == awokenHour && minute > awokenMin))
+    return kidsAwoken;
+
+  return kidsWakingUp;
+}
+
+
 void loop() { 
-  static bool wakeup = false;
-  static bool keepSleeping = false;
-
   displayTime();
-  
-  const byte* glyph = keepSleeping ? moon : smiley;
-  if (wakeup) {
-    moveUp(glyph, glyphSize);
-    display(glyph, 3000);
-    wakeup = false;
-  } else {
-    moveDown(glyph, glyphSize);  
-    wakeup = true;
-    keepSleeping = !keepSleeping;
-  }
-  
-/*  display(sleepingFace, 2000);
-  display(moon, 2000);
-  for (int i = 0; i < 10; i++) {
-    display(moonWithStar1, 400);
-    display(moonWithStar2, 1000);
-  }
-  display(moon, 2000);
+  byte kidsState = getKidsState();
 
-  display(stars, 2000);
-  for (int i = 0; i < 10; i++) {
-    display(stars1, 500);
-    display(stars2, 500);
-  }
-  display(stars, 2000);
-  display(smilingFace, 2000);*/
-  /*writeArduinoOnMatrix();
-  rows();
-  columns();
-  single();*/
+  switch (kidsState) {
+    case kidsAwoken:
+      lc.setIntensity(0,15);    
+      display(smiley, 3000);
+      break;
+    case kidsGoingToBed:;
+      lc.setIntensity(0,8);    
+      moveUp(moon, glyphSize);
+      break;
+    case kidsSleeping:
+      lc.setIntensity(0,1);    
+      display(moon, 3000);
+      break;
+    case kidsWakingUp:
+      lc.setIntensity(0,15);    
+      moveUp(smiley, glyphSize);
+      break;
+  }  
 }
