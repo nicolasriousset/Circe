@@ -186,13 +186,44 @@ byte sun[]={
 
 byte smiley[]={ 
                 B00000000,
-                B00000100,
-                B00100100,
-                B01100000,
-                B01100000,
-                B00100100,
-                B00000100,
-                B00000000};
+                B00110010,
+                B01100110,
+                B01000010,
+                B01000000,
+                B01000010,
+                B01100110,
+                B00110010};
+
+byte blink1[]={ 
+                B00010000,
+                B00110010,
+                B01100110,
+                B01000010,
+                B01000000,
+                B01000010,
+                B01100100,
+                B00100010};
+
+byte blink2[]={ 
+                B00011000,
+                B00110010,
+                B01100110,
+                B01000010,
+                B01000000,
+                B01000100,
+                B01000100,
+                B00000100};
+
+void wave() {
+  byte wavePic[8] = {0, 0, 0, 0 ,0 ,0 ,0 ,0};
+
+  for (int i = 0; i < 1000; ++i) {
+    for (int col = 0; col < 8; ++col) {
+      wavePic[col] = 1 << (4 + round(3.0 * sin((col + i) * (2*PI) / 8)));
+    }
+    display(wavePic, 100);
+  }
+}
 
 void moveDown(const byte* glyph, byte count) {
   byte settingGlyph[count];
@@ -256,26 +287,35 @@ byte getKidsState() {
   return kidsWakingUp;
 }
 
+void blink() {
+  display(blink1, 100);
+  display(blink2, 500);
+  display(blink1, 100);
+  display(smiley, 1000);
+}
 
 void loop() { 
+  // wave();
+  
   displayTime();
   byte kidsState = getKidsState();
 
   switch (kidsState) {
     case kidsAwoken:
       lc.setIntensity(0,15);    
-      display(smiley, 3000);
+      display(smiley, 5000);
+      blink();
       break;
     case kidsGoingToBed:;
       lc.setIntensity(0,8);    
       moveUp(moon, glyphSize);
       break;
     case kidsSleeping:
-      lc.setIntensity(0,1);    
+      lc.setIntensity(0,0);    
       display(moon, 3000);
       break;
     case kidsWakingUp:
-      lc.setIntensity(0,15);    
+      lc.setIntensity(0,8);    
       moveUp(smiley, glyphSize);
       break;
   }  
