@@ -282,6 +282,18 @@ void playWave(int delayMs) {
   }
 }
 
+void playEqualizer(int delayMs) {
+  byte equalizerPic[8] = {0, 0, 0, 0 ,0 ,0 ,0 ,0};
+  const int DELAY_PER_PIC = 100;
+
+  for (int i = 0, elapsedMs = 0; elapsedMs < delayMs; ++i, elapsedMs += DELAY_PER_PIC) {
+    for (int col = 0; col < 8; ++col) {
+      equalizerPic[col] = 0xFF << random(1, 8);
+    }
+    displayGlyph(equalizerPic, DELAY_PER_PIC);
+  }
+}
+
 void moveDown(const byte* glyph, byte count) {
   byte settingGlyph[count];
   memcpy(settingGlyph, glyph, count);
@@ -361,6 +373,8 @@ void loop() {
           playAnimation(ghostAnimation, countof(ghostAnimation));
         case 2:
           playWave(5000);
+        case 3:
+          playEqualizer(5000);
         default:    
           displayGlyph(smiley, 5000);      
           playAnimation(blinkAnimation, countof(blinkAnimation));
