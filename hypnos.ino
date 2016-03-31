@@ -4,6 +4,8 @@
 
 #define DS3231_I2C_ADDRESS 0x68
 
+#define countof( x )  ( sizeof( x ) / sizeof( *x ) )
+
 /*
  Now we need a LedControl to work with.
  ***** These pin numbers will probably not work with your hardware *****
@@ -84,7 +86,7 @@ void setup() {
   
   // Clock initialization
   // Serial.print("Clock initialization\n");
-  //setDS3231time(0, 58, 15, 1, 20, 3, 16);
+  // setDS3231time(0, 37, 21, 5, 31, 3, 16);
 }
 
 byte decToBcd(byte val)
@@ -97,7 +99,7 @@ byte bcdToDec(byte val)
   return( (val/16*10) + (val%16) );
 }
 
-void displayTime()
+void logTime()
 {
   byte second, minute, hour, dayOfWeek, dayOfMonth, month, year;
   // retrieve data from DS3231
@@ -126,41 +128,28 @@ void displayTime()
   Serial.print(year, DEC);
   Serial.print(" Day of week: ");
   switch(dayOfWeek){
-  case 1:
+  case Sunday:
     Serial.println("Sunday");
     break;
-  case 2:
+  case Monday:
     Serial.println("Monday");
     break;
-  case 3:
+  case Tuesday:
     Serial.println("Tuesday");
     break;
-  case 4:
+  case Wednesday:
     Serial.println("Wednesday");
     break;
-  case 5:
+  case Thursday:
     Serial.println("Thursday");
     break;
-  case 6:
+  case Friday:
     Serial.println("Friday");
     break;
-  case 7:
+  case Saturday:
     Serial.println("Saturday");
     break;
   }
-}
-
-void display(const byte* picture, int delayTime) {
-  /* now display them one by one with a small delay */
-  lc.setRow(0,0,picture[0]);
-  lc.setRow(0,1,picture[1]);
-  lc.setRow(0,2,picture[2]);
-  lc.setRow(0,3,picture[3]);
-  lc.setRow(0,4,picture[4]);
-  lc.setRow(0,5,picture[5]);
-  lc.setRow(0,6,picture[6]);
-  lc.setRow(0,7,picture[7]);
-  delay(delayTime);
 }
 
 const byte moon[]={ B00111100,
@@ -172,7 +161,7 @@ const byte moon[]={ B00111100,
                     B01000000,
                     B00100000};
 
-const byte glyphSize = sizeof(moon) / sizeof(moon[0]);
+const byte glyphSize = countof(moon);
 
 byte sun[]={ 
                 B10001000,
@@ -194,7 +183,7 @@ byte smiley[]={
                 B01100110,
                 B00110010};
 
-byte skull[]={ 
+byte skull1[]={ 
                 B00011110,
                 B00111111,
                 B11100111,
@@ -204,6 +193,36 @@ byte skull[]={
                 B11100111,
                 B00111110};
 
+byte skull2[]={ 
+                B00011110,
+                B11100111,
+                B01100111,
+                B11111111,
+                B01100111,
+                B11100111,
+                B00111111,
+                B00111110};
+
+byte ghost1[]={ 
+                B00000000,
+                B11111100,
+                B11111110,
+                B11100111,
+                B10111111,
+                B10111111,
+                B10100110,
+                B11111100};
+
+byte ghost2[]={ 
+                B11111100,
+                B10100110,
+                B10111111,
+                B10111111,
+                B11100111,
+                B11111110,
+                B11111100,
+                B00000000};
+           
 byte blink1[]={ 
                 B00010000,
                 B00110010,
@@ -224,14 +243,42 @@ byte blink2[]={
                 B01000100,
                 B00000100};
 
-void wave() {
-  byte wavePic[8] = {0, 0, 0, 0 ,0 ,0 ,0 ,0};
+typedef struct AnimationStep {
+  byte* glyph; // picture to display
+  int delay; // display time, in ms
+} AnimationStep;
 
-  for (int i = 0; i < 1000; ++i) {
+AnimationStep blinkAnimation[] = { { blink1, 100 }, { blink2, 500 }, { blink1, 100 }, { smiley, 1000 } };
+AnimationStep ghostAnimation[] = { { ghost1, 800 }, { ghost2, 800 }, { ghost1, 800 }, { ghost2, 800 }, { ghost1, 800 }, { ghost2, 800 } };
+AnimationStep skullAnimation[] = { { skull1, 800 }, { skull2, 800 }, { skull1, 800 }, { skull2, 800 }, { skull1, 800 }, { skull2, 800 } };
+
+void displayGlyph(const byte* picture, int delayTime) {
+  lc.setRow(0,0,picture[0]);
+  lc.setRow(0,1,picture[1]);
+  lc.setRow(0,2,picture[2]);
+  lc.setRow(0,3,picture[3]);
+  lc.setRow(0,4,picture[4]);
+  lc.setRow(0,5,picture[5]);
+  lc.setRow(0,6,picture[6]);
+  lc.setRow(0,7,picture[7]);
+  delay(delayTime);
+}
+
+void playAnimation(struct AnimationStep* steps, byte stepsCount) {
+  for (int i = 0; i < stepsCount; ++i) {
+    displayGlyph(steps[i].glyph, steps[i].delay);
+  }
+}
+
+void playWave(int delayMs) {
+  byte wavePic[8] = {0, 0, 0, 0 ,0 ,0 ,0 ,0};
+  const int DELAY_PER_PIC = 100;
+
+  for (int i = 0, elapsedMs = 0; elapsedMs < delayMs; ++i, elapsedMs += DELAY_PER_PIC) {
     for (int col = 0; col < 8; ++col) {
       wavePic[col] = 1 << (4 + round(3.0 * sin((col + i) * (2*PI) / 8)));
     }
-    display(wavePic, 100);
+    displayGlyph(wavePic, DELAY_PER_PIC);
   }
 }
 
@@ -240,32 +287,34 @@ void moveDown(const byte* glyph, byte count) {
   memcpy(settingGlyph, glyph, count);
 
   for (int i = 0; i < count; ++i) {
-    display(settingGlyph, 1000);
+    displayGlyph(settingGlyph, 1000);
     // shift one row down
     for (int j = count - 1; j >= 0; --j)
       settingGlyph[j] = glyph[j] << i;
   }
-  display(settingGlyph, 1000);
+  displayGlyph(settingGlyph, 1000);
 }
 
-void moveUp(const byte* glyph, byte count) {
-  byte risingGlyph[count];
-  memset(risingGlyph, 0, count);
+void moveUp(const byte* glyph, byte rowCount) {
+  byte risingGlyph[rowCount];
+  memset(risingGlyph, 0, rowCount);
 
-  for (int i = count - 1; i >= 0; --i) {
-    display(risingGlyph, 1000);
+  for (int i = rowCount - 1; i >= 0; --i) {
+    displayGlyph(risingGlyph, 1000);
     // shift one row up
-    for (int j = 0; j < count; ++j)
+    for (int j = 0; j < rowCount; ++j)
       risingGlyph[j] = glyph[j] << i;
   }
-  display(risingGlyph, 1000);
+  displayGlyph(risingGlyph, 1000);
 }
 
 byte getKidsState() {
+  // Based on the current day and time, define in which state the kids should be (sleeping, awoken, etc.)
   byte second, minute, hour, dayOfWeek, dayOfMonth, month, year;
-  // retrieve data from DS3231
+  // Read date and time from DS3231
   readDS3231time(&second, &minute, &hour, &dayOfWeek, &dayOfMonth, &month, &year);
-  
+
+  // What's the kids schedule ?
   byte goingToBedHour = 20;
   byte goingToBedMin = 00;
   byte sleepingHour = 20;
@@ -283,7 +332,7 @@ byte getKidsState() {
   }
   
   // Assumptions :
-  // - kids are sleeping at midnight 
+  // - kids are asleep at midnight 
   // - kidsWakingUpTime < kidsAwokenTime < kidsGoingToBedTime < kidsSleepingTime
   if (hour > sleepingHour || (hour == sleepingHour && minute > sleepingMin) || (hour < wakingUpHour) || (hour == wakingUpHour && minute < wakingUpMin))
     return kidsSleeping;
@@ -297,24 +346,25 @@ byte getKidsState() {
   return kidsWakingUp;
 }
 
-void blink() {
-  display(blink1, 100);
-  display(blink2, 500);
-  display(blink1, 100);
-  display(smiley, 1000);
-}
-
 void loop() { 
-  // wave();
-  
-  displayTime();
+  logTime();
   byte kidsState = getKidsState();
 
   switch (kidsState) {
     case kidsAwoken:
-      lc.setIntensity(0,15);    
-      display(smiley, 5000);
-      blink();
+      lc.setIntensity(0,15);
+      // Play some random animations when the kids are awoken
+      switch (random(0, 10)) {
+        case 0:
+          playAnimation(skullAnimation, countof(skullAnimation));          
+        case 1:
+          playAnimation(ghostAnimation, countof(ghostAnimation));
+        case 2:
+          playWave(5000);
+        default:    
+          displayGlyph(smiley, 5000);      
+          playAnimation(blinkAnimation, countof(blinkAnimation));
+      }
       break;
     case kidsGoingToBed:;
       lc.setIntensity(0,8);    
@@ -322,7 +372,7 @@ void loop() {
       break;
     case kidsSleeping:
       lc.setIntensity(0,0);    
-      display(moon, 3000);
+      displayGlyph(moon, 3000);
       break;
     case kidsWakingUp:
       lc.setIntensity(0,8);    
