@@ -3,6 +3,7 @@
 #include "Wire.h"
 
 #define DS3231_I2C_ADDRESS 0x68
+#define MICROPHONE_PIN A0 // select the input pin for the potentiometer
 
 #define countof( x )  ( sizeof( x ) / sizeof( *x ) )
 
@@ -87,6 +88,7 @@ void setup() {
   // Clock initialization
   // Serial.print("Clock initialization\n");
   // setDS3231time(0, 37, 21, 5, 31, 3, 16);
+  logTime();
 }
 
 byte decToBcd(byte val)
@@ -183,6 +185,26 @@ byte smiley[]={
                 B01100110,
                 B00110010};
 
+byte smileyLeft[]={ 
+                B00000000,
+                B00110110,
+                B01100010,
+                B01000010,
+                B01000000,
+                B01000110,
+                B01100010,
+                B00110010};
+
+byte smileyRight[]={ 
+                B00000000,
+                B00110010,
+                B01100010,
+                B01000110,
+                B01000000,
+                B01000010,
+                B01100010,
+                B00110110};
+
 byte skull1[]={ 
                 B00011110,
                 B00111111,
@@ -204,7 +226,7 @@ byte skull2[]={
                 B00111110};
 
 byte ghost1[]={ 
-                B00000000,
+                B10000000,
                 B11111100,
                 B11111110,
                 B11100111,
@@ -221,7 +243,7 @@ byte ghost2[]={
                 B11100111,
                 B11111110,
                 B11111100,
-                B00000000};
+                B10000000};
            
 byte blink1[]={ 
                 B00010000,
@@ -251,8 +273,9 @@ typedef struct AnimationStep {
 AnimationStep blinkAnimation[] = { { blink1, 100 }, { blink2, 500 }, { blink1, 100 }, { smiley, 1000 } };
 AnimationStep ghostAnimation[] = { { ghost1, 800 }, { ghost2, 800 }, { ghost1, 800 }, { ghost2, 800 }, { ghost1, 800 }, { ghost2, 800 } };
 AnimationStep skullAnimation[] = { { skull1, 800 }, { skull2, 800 }, { skull1, 800 }, { skull2, 800 }, { skull1, 800 }, { skull2, 800 } };
+AnimationStep lookOnSidesAnimation[] = { { smiley, 800 }, { smileyLeft, 800 }, { smiley, 800 }, { smileyRight, 800 }, { smiley, 800 } };
 
-void displayGlyph(const byte* picture, int delayTime) {
+void displayGlyph(const byte* picture, int delayTime = 0) {
   lc.setRow(0,0,picture[0]);
   lc.setRow(0,1,picture[1]);
   lc.setRow(0,2,picture[2]);
@@ -334,13 +357,13 @@ byte getKidsState() {
   
   byte wakingUpHour = 7;
   byte wakingUpMin = 00;
-  byte awokenHour = 7;
-  byte awokenMin = 30;
+  byte awokenHour = 8;
+  byte awokenMin = 00;
   if (dayOfWeek == Saturday || dayOfWeek == Sunday) {
     wakingUpHour = 8;
     wakingUpMin = 0;
-    awokenHour = 8;
-    awokenMin = 30;
+    awokenHour = 9;
+    awokenMin = 00;
   }
   
   // Assumptions :
@@ -358,39 +381,104 @@ byte getKidsState() {
   return kidsWakingUp;
 }
 
+int soundLevelHistory[100] = {0};
+int soundLevelNextHistoryPos = 0;
+int soundLevelHistoryCount = 0;
+
+byte previousKidsState = -1;
+
+float computeSilenceLevel() {
+  float silenceLevel = 0.0;
+  for (int i = 0; i < soundLevelHistoryCount; ++i) {
+    silenceLevel +=  float(soundLevelHistory[i]) / float(soundLevelHistoryCount);    
+  }
+
+  return silenceLevel;
+}
+
+void appendSoundLevel(int soundLevel) {
+  soundLevelHistory[soundLevelNextHistoryPos] = soundLevel;
+  soundLevelNextHistoryPos = (soundLevelNextHistoryPos + 1) % countof(soundLevelHistory);
+  soundLevelHistoryCount = soundLevelHistoryCount < countof(soundLevelHistory) ? soundLevelHistoryCount + 1 : soundLevelHistoryCount;
+}
+
+bool isClap(int soundLevel) {
+  float silenceLevel = computeSilenceLevel();
+  if (silenceLevel == 0)
+    return false;
+    
+  float clapThreshold = silenceLevel * 1.002;
+  
+  Serial.print(soundLevel, DEC);
+  Serial.print(">=  ");
+  Serial.print(clapThreshold, DEC);
+  Serial.print(" ? ");
+  
+  bool clapped = ((float)soundLevel >= clapThreshold);
+  if (clapped)
+    Serial.print(" Clap detected  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\n");
+  else
+    Serial.print(" No\r\n");
+  return clapped;
+}
+
 void loop() { 
-  logTime();
-  byte kidsState = getKidsState();
+  byte kidsState = getKidsState();  
+  bool stateChanged = kidsState != previousKidsState;
 
   switch (kidsState) {
     case kidsAwoken:
-      lc.setIntensity(0,15);
-      // Play some random animations when the kids are awoken
-      switch (random(0, 10)) {
-        case 0:
-          playAnimation(skullAnimation, countof(skullAnimation));          
-        case 1:
-          playAnimation(ghostAnimation, countof(ghostAnimation));
-        case 2:
-          playWave(5000);
-        case 3:
-          playEqualizer(5000);
-        default:    
-          displayGlyph(smiley, 5000);      
-          playAnimation(blinkAnimation, countof(blinkAnimation));
+      {
+        // When a big noise is detected (ex : a clap), play some random animations if the kids are awoken
+        int soundLevel = analogRead (MICROPHONE_PIN);
+
+        if (isClap(soundLevel)) {
+          // Clap detected
+          switch (random(0, 6)) {
+            case 0:
+              playAnimation(skullAnimation, countof(skullAnimation));
+              break;          
+            case 1:
+              playAnimation(ghostAnimation, countof(ghostAnimation));
+              break;          
+            case 2:
+              playWave(5000);
+              break;          
+            case 3:
+              playEqualizer(5000);
+              break;          
+            case 4:
+              playAnimation(lookOnSidesAnimation, countof(lookOnSidesAnimation));
+              break;          
+            default:    
+              playAnimation(blinkAnimation, countof(blinkAnimation));
+          }
+        } 
+
+        if (isClap(soundLevel) || stateChanged) {
+          lc.setIntensity(0,15);
+          lc.clearDisplay(0);
+        }
+
+        appendSoundLevel(soundLevel);
       }
       break;
-    case kidsGoingToBed:;
+    case kidsGoingToBed:
       lc.setIntensity(0,8);    
       moveUp(moon, glyphSize);
       break;
     case kidsSleeping:
-      lc.setIntensity(0,0);    
-      displayGlyph(moon, 3000);
+      if (stateChanged) {
+        lc.setIntensity(0,0);    
+        displayGlyph(moon, 100);
+      }
       break;
     case kidsWakingUp:
       lc.setIntensity(0,8);    
-      moveUp(smiley, glyphSize);
+      playAnimation(lookOnSidesAnimation, countof(lookOnSidesAnimation));
+      playAnimation(blinkAnimation, countof(blinkAnimation));
       break;
-  }  
+  }
+
+  previousKidsState = kidsState;
 }
