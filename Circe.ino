@@ -4,8 +4,7 @@
 
 #define DS3231_I2C_ADDRESS 0x68
 #define MICROPHONE_PIN A0 // select the input pin for the potentiometer
-
-#define countof( x )  ( sizeof( x ) / sizeof( *x ) )
+#define _countof( x )  ( sizeof( x ) / sizeof( *x ) )
 
 /*
  Now we need a LedControl to work with.
@@ -72,16 +71,6 @@ byte *year)
 }
 
 void setup() {
-  /*
-   The MAX72XX is in power-saving mode on startup,
-   we have to do a wakeup call
-   */
-  lc.shutdown(0,false);
-  /* Set the brightness to a medium values */
-  lc.setIntensity(0,8);
-  /* and clear the display */
-  lc.clearDisplay(0);
-    
   Wire.begin();
   Serial.begin(9600);  
   
@@ -163,7 +152,7 @@ const byte moon[]={ B00111100,
                     B01000000,
                     B00100000};
 
-const byte glyphSize = countof(moon);
+const byte glyphSize = _countof(moon);
 
 byte sun[]={ 
                 B10001000,
@@ -381,45 +370,87 @@ byte getKidsState() {
   return kidsWakingUp;
 }
 
-int soundLevelHistory[100] = {0};
-int soundLevelNextHistoryPos = 0;
-int soundLevelHistoryCount = 0;
-
 byte previousKidsState = -1;
 
-float computeSilenceLevel() {
+typedef struct {
+  size_t timeMs;
+  int level;
+} SoundLevel;
+
+
+SoundLevel soundLevelHistory[50] = { 0 };
+int soundLevelHistoryPos = -1;
+int soundLevelHistoryCount = 0;
+size_t lastClapDetectionTime = 0;
+
+float soundLevelAverage(size_t from = 0, size_t to = 0xFFFFFFFF) {
   float silenceLevel = 0.0;
+  int nbSamples = 0;
   for (int i = 0; i < soundLevelHistoryCount; ++i) {
-    silenceLevel +=  float(soundLevelHistory[i]) / float(soundLevelHistoryCount);    
+    if (soundLevelHistory[i].timeMs >= from && soundLevelHistory[i].timeMs <= to) {
+      silenceLevel += float(soundLevelHistory[i].level);
+      ++nbSamples;
+    }
   }
+
+  if (nbSamples == 0)
+    return 0;
+
+  silenceLevel /= (float)nbSamples;
 
   return silenceLevel;
 }
 
-void appendSoundLevel(int soundLevel) {
-  soundLevelHistory[soundLevelNextHistoryPos] = soundLevel;
-  soundLevelNextHistoryPos = (soundLevelNextHistoryPos + 1) % countof(soundLevelHistory);
-  soundLevelHistoryCount = soundLevelHistoryCount < countof(soundLevelHistory) ? soundLevelHistoryCount + 1 : soundLevelHistoryCount;
+float soundLevelMeanAbsoluteDeviation(float avgSoundLevel, size_t from = 0, size_t to = 0xFFFFFFFF) {
+  float meanAbsDev = 0.0;
+  int nbSamples = 0;
+  for (int i = 0; i < soundLevelHistoryCount; ++i) {
+    if (soundLevelHistory[i].timeMs >= from && soundLevelHistory[i].timeMs <= to) {
+      meanAbsDev += float(soundLevelHistory[i].level) > avgSoundLevel ? float(soundLevelHistory[i].level) - avgSoundLevel : avgSoundLevel - float(soundLevelHistory[i].level);
+      ++nbSamples;
+    }
+  }
+
+  if (nbSamples == 0)
+    return 0;
+
+  meanAbsDev /= (float)nbSamples;
+
+  return meanAbsDev;
 }
 
-bool isClap(int soundLevel) {
-  float silenceLevel = computeSilenceLevel();
-  if (silenceLevel == 0)
+
+
+void appendSoundLevel(size_t timeMs, int soundLevel) {
+  soundLevelHistoryPos = ++soundLevelHistoryPos % _countof(soundLevelHistory);
+  if (soundLevelHistoryCount < _countof(soundLevelHistory))
+    ++soundLevelHistoryCount;
+
+  soundLevelHistory[soundLevelHistoryPos].timeMs = timeMs;
+  soundLevelHistory[soundLevelHistoryPos].level = soundLevel;
+  Serial.print(timeMs);
+  Serial.print(";");
+  Serial.println(soundLevel);
+}
+
+bool hasClapped(size_t previousClapTime = 0) {
+  if (soundLevelHistoryCount == 0)
     return false;
-    
-  float clapThreshold = silenceLevel * 1.002;
   
-  Serial.print(soundLevel, DEC);
-  Serial.print(">=  ");
-  Serial.print(clapThreshold, DEC);
-  Serial.print(" ? ");
-  
-  bool clapped = ((float)soundLevel >= clapThreshold);
-  if (clapped)
-    Serial.print(" Clap detected  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\n");
-  else
-    Serial.print(" No\r\n");
-  return clapped;
+  const size_t CLAP_DURATION = 200;
+
+  int lastSamplingTime = soundLevelHistory[soundLevelHistoryPos].timeMs;
+  if (lastSamplingTime - previousClapTime < (3*CLAP_DURATION))
+    return false; // not enough time elapsed since previous clap, ignore
+
+  // A clap lasts 200 ms, we compare the sound level from the latest 200 ms to the previous one
+  float avgSoundLevel = soundLevelAverage(0, lastSamplingTime - CLAP_DURATION);
+  if (avgSoundLevel == 0)
+    return false; 
+
+  float recentDeviationFromAvgSoundLevel = soundLevelMeanAbsoluteDeviation(avgSoundLevel, lastSamplingTime - CLAP_DURATION);
+
+  return recentDeviationFromAvgSoundLevel > 1.0;
 }
 
 void loop() { 
@@ -431,15 +462,21 @@ void loop() {
       {
         // When a big noise is detected (ex : a clap), play some random animations if the kids are awoken
         int soundLevel = analogRead (MICROPHONE_PIN);
+        appendSoundLevel(millis(), soundLevel);
+        bool clapped = hasClapped();
 
-        if (isClap(soundLevel)) {
+        if (clapped) {
           // Clap detected
+          lc.shutdown(0,false);
+          lc.setIntensity(0,15);
+          lc.clearDisplay(0);
+          
           switch (random(0, 6)) {
             case 0:
-              playAnimation(skullAnimation, countof(skullAnimation));
+              playAnimation(skullAnimation, _countof(skullAnimation));
               break;          
             case 1:
-              playAnimation(ghostAnimation, countof(ghostAnimation));
+              playAnimation(ghostAnimation, _countof(ghostAnimation));
               break;          
             case 2:
               playWave(5000);
@@ -448,35 +485,36 @@ void loop() {
               playEqualizer(5000);
               break;          
             case 4:
-              playAnimation(lookOnSidesAnimation, countof(lookOnSidesAnimation));
+              playAnimation(lookOnSidesAnimation, _countof(lookOnSidesAnimation));
               break;          
             default:    
-              playAnimation(blinkAnimation, countof(blinkAnimation));
+              playAnimation(blinkAnimation, _countof(blinkAnimation));
           }
         } 
 
-        if (isClap(soundLevel) || stateChanged) {
-          lc.setIntensity(0,15);
+        if (clapped || stateChanged) {
           lc.clearDisplay(0);
+          lc.shutdown(0,true);
         }
-
-        appendSoundLevel(soundLevel);
       }
       break;
     case kidsGoingToBed:
+      lc.shutdown(0,false);
       lc.setIntensity(0,8);    
       moveUp(moon, glyphSize);
       break;
     case kidsSleeping:
       if (stateChanged) {
+        lc.shutdown(0,false);
         lc.setIntensity(0,0);    
         displayGlyph(moon, 100);
       }
       break;
     case kidsWakingUp:
+      lc.shutdown(0,false);
       lc.setIntensity(0,8);    
-      playAnimation(lookOnSidesAnimation, countof(lookOnSidesAnimation));
-      playAnimation(blinkAnimation, countof(blinkAnimation));
+      playAnimation(lookOnSidesAnimation, _countof(lookOnSidesAnimation));
+      playAnimation(blinkAnimation, _countof(blinkAnimation));
       break;
   }
 
