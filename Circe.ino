@@ -3,7 +3,6 @@
 #include "Wire.h"
 
 #define DS3231_I2C_ADDRESS 0x68
-#define MICROPHONE_PIN A0 // select the input pin for the potentiometer
 #define _countof( x )  ( sizeof( x ) / sizeof( *x ) )
 
 /*
@@ -374,115 +373,6 @@ byte getKidsState() {
 
 byte previousKidsState = -1;
 
-typedef struct {
-  unsigned long timeMs;
-  int level;
-} SoundLevel;
-
-
-SoundLevel soundLevelHistory[50] = { 0 };
-int soundLevelHistoryPos = -1;
-int soundLevelHistoryCount = 0;
-unsigned long lastClapDetectionTime = 0;
-
-float soundLevelAverage(unsigned long from = 0, unsigned long to = 0xFFFFFFFF) {
-  float soundLevelAvg = 0.0;
-  int nbSamples = 0;
-  for (int i = 0; i < soundLevelHistoryCount; ++i) {
-    if (soundLevelHistory[i].timeMs >= from && soundLevelHistory[i].timeMs <= to) {
-      soundLevelAvg += float(soundLevelHistory[i].level);
-      ++nbSamples;
-    }
-  }
-
-  if (nbSamples == 0)
-    return 0;
-
-  soundLevelAvg /= (float)nbSamples;
-
-  return soundLevelAvg;
-}
-
-float soundLevelMeanAbsoluteDeviation(float avgSoundLevel, unsigned long from = 0, unsigned long to = 0xFFFFFFFF) {
-  float meanAbsDev = 0.0;
-  int nbSamples = 0;
-  float periodAvg = 0;
-  for (int i = 0; i < soundLevelHistoryCount; ++i) {
-    if (soundLevelHistory[i].timeMs >= from && soundLevelHistory[i].timeMs <= to) {
-      float deviation = float(soundLevelHistory[i].level) - avgSoundLevel;
-      periodAvg += soundLevelHistory[i].level;
-      meanAbsDev += abs(deviation); // float(soundLevelHistory[i].level) > avgSoundLevel ? float(soundLevelHistory[i].level) - avgSoundLevel : avgSoundLevel - float(soundLevelHistory[i].level);
-      ++nbSamples;
-    }
-  }
-
-  if (nbSamples == 0)
-    return 0;
-
-  meanAbsDev /= (float)nbSamples;
-  periodAvg /= (float)nbSamples;
-
-  Serial.print("Past 200ms sound level = ");
-  Serial.print(avgSoundLevel);
-  Serial.print(" ; deviation = ");
-  Serial.print(meanAbsDev);
-  Serial.print(" ; average = ");
-  Serial.println(periodAvg);
-
-  return meanAbsDev;
-}
-
-
-void recordSoundLevel() {
-  int soundLevel = analogRead (MICROPHONE_PIN);
-  appendSoundLevel(millis(), soundLevel);  
-}
-
-void appendSoundLevel(unsigned long timeMs, int soundLevel) {
-  soundLevelHistoryPos = ++soundLevelHistoryPos % _countof(soundLevelHistory);
-  if (soundLevelHistoryCount < _countof(soundLevelHistory))
-    ++soundLevelHistoryCount;
-
-  soundLevelHistory[soundLevelHistoryPos].timeMs = timeMs;
-  soundLevelHistory[soundLevelHistoryPos].level = soundLevel;
-  Serial.print(timeMs);
-  Serial.print(";");
-  Serial.println(soundLevel);
-}
-
-bool hasClapped(unsigned long previousClapTime = 0) {
-  if (soundLevelHistoryCount == 0) {
-    Serial.println("History too short");
-    return false;
-  }
-  
-  const unsigned long CLAP_DURATION = 200;
-
-  int lastSamplingTime = soundLevelHistory[soundLevelHistoryPos].timeMs;
-  if (lastSamplingTime - previousClapTime < (3*CLAP_DURATION)) {
-    Serial.println("Not enought time since last clap");
-    return false; // not enough time elapsed since previous clap, ignore
-  }
-
-  // A clap lasts 200 ms, we compare the sound level from the latest 200 ms to the average sound level
-  float avgSoundLevel = soundLevelAverage(0, lastSamplingTime - CLAP_DURATION);
-  if (avgSoundLevel == 0) {
-    Serial.println("Avg sound level = 0");
-    return false; 
-  }
-
-  float recentDeviationFromAvgSoundLevel = soundLevelMeanAbsoluteDeviation(avgSoundLevel, lastSamplingTime - CLAP_DURATION);
-
-  return recentDeviationFromAvgSoundLevel > 1.0;
-}
-
-void clearSoundLevelHistory() {
-  soundLevelHistoryPos = -1;
-  soundLevelHistoryCount = 0;
-  lastClapDetectionTime = 0;
-  Serial.println("Sound level history cleared");
-}
-
 void loop() { 
   byte kidsState = getKidsState();  
   bool stateChanged = kidsState != previousKidsState;
@@ -490,50 +380,41 @@ void loop() {
   switch (kidsState) {
     case kidsAwoken:
       {
-        // When a big noise is detected (ex : a clap), play some random animations if the kids are awoken
-        recordSoundLevel();
-        bool clapped = hasClapped();
-
-        if (true /*clapped*/) {
-          // Clap detected
-          lc.shutdown(0,false);
-          lc.setIntensity(0,8);
-          lc.clearDisplay(0);
+        lc.shutdown(0,false);
+        lc.setIntensity(0,8);
+        lc.clearDisplay(0);
           
-          switch (random(0, 20)) {
-            case 0:
-              playAnimation(skullAnimation, _countof(skullAnimation));
-              break;          
-            case 1:
-              playAnimation(ghostAnimation, _countof(ghostAnimation));
-              break;          
-            case 2:
-              playWave(5000);
-              break;          
-            case 3:
-              playEqualizer(5000);
-              break;          
-            case 4:
-            case 5:
-            case 6:
-            case 7:
-            case 8:
-              playAnimation(blinkAnimation, _countof(blinkAnimation));
-              break;          
-            case 9:
-            case 10:
-            case 11:
-            case 12:
-            case 13:
-              playAnimation(lookOnSidesAnimation, _countof(lookOnSidesAnimation));
-            default:    
-              displayGlyph(smiley, 1000);
-          }
+        switch (random(0, 20)) {
+          case 0:
+            playAnimation(skullAnimation, _countof(skullAnimation));
+            break;          
+          case 1:
+            playAnimation(ghostAnimation, _countof(ghostAnimation));
+            break;          
+          case 2:
+            playWave(5000);
+            break;          
+          case 3:
+            playEqualizer(5000);
+            break;          
+          case 4:
+          case 5:
+          case 6:
+          case 7:
+          case 8:
+            playAnimation(blinkAnimation, _countof(blinkAnimation));
+            break;          
+          case 9:
+          case 10:
+          case 11:
+          case 12:
+          case 13:
+            playAnimation(lookOnSidesAnimation, _countof(lookOnSidesAnimation));
+          default:    
+            displayGlyph(smiley, 1000);
+        }
 
-          clearSoundLevelHistory();
-        } 
-
-        if (clapped || stateChanged) {
+        if (stateChanged) {
           lc.clearDisplay(0);
           lc.shutdown(0,true);
         }
