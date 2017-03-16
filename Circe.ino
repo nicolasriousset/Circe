@@ -334,7 +334,7 @@ void moveUp(const byte* glyph, byte rowCount) {
 }
 
 byte getKidsState() {
-  // return kidsAwoken; // kidsWakingUp; // kidsGoingToBed; // 
+  // return kidsWakingUp; // kidsAwoken; // kidsGoingToBed; // 
   // Based on the current day and time, define in which state the kids should be (sleeping, awoken, etc.)
   byte second, minute, hour, dayOfWeek, dayOfMonth, month, year;
   // Read date and time from DS3231
@@ -494,13 +494,13 @@ void loop() {
         recordSoundLevel();
         bool clapped = hasClapped();
 
-        if (clapped) {
+        if (true /*clapped*/) {
           // Clap detected
           lc.shutdown(0,false);
-          lc.setIntensity(0,15);
+          lc.setIntensity(0,8);
           lc.clearDisplay(0);
           
-          switch (random(0, 6)) {
+          switch (random(0, 20)) {
             case 0:
               playAnimation(skullAnimation, _countof(skullAnimation));
               break;          
@@ -514,10 +514,20 @@ void loop() {
               playEqualizer(5000);
               break;          
             case 4:
-              playAnimation(lookOnSidesAnimation, _countof(lookOnSidesAnimation));
-              break;          
-            default:    
+            case 5:
+            case 6:
+            case 7:
+            case 8:
               playAnimation(blinkAnimation, _countof(blinkAnimation));
+              break;          
+            case 9:
+            case 10:
+            case 11:
+            case 12:
+            case 13:
+              playAnimation(lookOnSidesAnimation, _countof(lookOnSidesAnimation));
+            default:    
+              displayGlyph(smiley, 1000);
           }
 
           clearSoundLevelHistory();
@@ -531,7 +541,7 @@ void loop() {
       break;
     case kidsGoingToBed:
       lc.shutdown(0,false);
-      lc.setIntensity(0,8);    
+      lc.setIntensity(0,4);    
       moveUp(moon, glyphSize);
       break;
     case kidsSleeping:
