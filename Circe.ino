@@ -76,7 +76,7 @@ void setup() {
   
   // Clock initialization
   // Serial.print("Clock initialization\n");
-  // setDS3231time(0, 37, 21, 5, 31, 3, 16);
+  // setDS3231time(0, 52, 21, 4, 15, 3, 17);
   logTime();
 }
 
@@ -264,7 +264,7 @@ AnimationStep ghostAnimation[] = { { ghost1, 800 }, { ghost2, 800 }, { ghost1, 8
 AnimationStep skullAnimation[] = { { skull1, 800 }, { skull2, 800 }, { skull1, 800 }, { skull2, 800 }, { skull1, 800 }, { skull2, 800 } };
 AnimationStep lookOnSidesAnimation[] = { { smiley, 800 }, { smileyLeft, 800 }, { smiley, 800 }, { smileyRight, 800 }, { smiley, 800 } };
 
-void displayGlyph(const byte* picture, int delayTime = 0) {
+void displayGlyph(const byte* picture, unsigned long delayTime = 0) {
   lc.setRow(0,0,picture[0]);
   lc.setRow(0,1,picture[1]);
   lc.setRow(0,2,picture[2]);
@@ -273,6 +273,7 @@ void displayGlyph(const byte* picture, int delayTime = 0) {
   lc.setRow(0,5,picture[5]);
   lc.setRow(0,6,picture[6]);
   lc.setRow(0,7,picture[7]);
+
   delay(delayTime);
 }
 
@@ -333,6 +334,7 @@ void moveUp(const byte* glyph, byte rowCount) {
 }
 
 byte getKidsState() {
+  // return kidsAwoken; // kidsWakingUp; // kidsGoingToBed; // 
   // Based on the current day and time, define in which state the kids should be (sleeping, awoken, etc.)
   byte second, minute, hour, dayOfWeek, dayOfMonth, month, year;
   // Read date and time from DS3231
@@ -346,8 +348,8 @@ byte getKidsState() {
   
   byte wakingUpHour = 7;
   byte wakingUpMin = 00;
-  byte awokenHour = 8;
-  byte awokenMin = 00;
+  byte awokenHour = 7;
+  byte awokenMin = 30;
   if (dayOfWeek == Saturday || dayOfWeek == Sunday) {
     wakingUpHour = 8;
     wakingUpMin = 0;
@@ -373,7 +375,7 @@ byte getKidsState() {
 byte previousKidsState = -1;
 
 typedef struct {
-  size_t timeMs;
+  unsigned long timeMs;
   int level;
 } SoundLevel;
 
@@ -381,14 +383,14 @@ typedef struct {
 SoundLevel soundLevelHistory[50] = { 0 };
 int soundLevelHistoryPos = -1;
 int soundLevelHistoryCount = 0;
-size_t lastClapDetectionTime = 0;
+unsigned long lastClapDetectionTime = 0;
 
-float soundLevelAverage(size_t from = 0, size_t to = 0xFFFFFFFF) {
-  float silenceLevel = 0.0;
+float soundLevelAverage(unsigned long from = 0, unsigned long to = 0xFFFFFFFF) {
+  float soundLevelAvg = 0.0;
   int nbSamples = 0;
   for (int i = 0; i < soundLevelHistoryCount; ++i) {
     if (soundLevelHistory[i].timeMs >= from && soundLevelHistory[i].timeMs <= to) {
-      silenceLevel += float(soundLevelHistory[i].level);
+      soundLevelAvg += float(soundLevelHistory[i].level);
       ++nbSamples;
     }
   }
@@ -396,17 +398,20 @@ float soundLevelAverage(size_t from = 0, size_t to = 0xFFFFFFFF) {
   if (nbSamples == 0)
     return 0;
 
-  silenceLevel /= (float)nbSamples;
+  soundLevelAvg /= (float)nbSamples;
 
-  return silenceLevel;
+  return soundLevelAvg;
 }
 
-float soundLevelMeanAbsoluteDeviation(float avgSoundLevel, size_t from = 0, size_t to = 0xFFFFFFFF) {
+float soundLevelMeanAbsoluteDeviation(float avgSoundLevel, unsigned long from = 0, unsigned long to = 0xFFFFFFFF) {
   float meanAbsDev = 0.0;
   int nbSamples = 0;
+  float periodAvg = 0;
   for (int i = 0; i < soundLevelHistoryCount; ++i) {
     if (soundLevelHistory[i].timeMs >= from && soundLevelHistory[i].timeMs <= to) {
-      meanAbsDev += float(soundLevelHistory[i].level) > avgSoundLevel ? float(soundLevelHistory[i].level) - avgSoundLevel : avgSoundLevel - float(soundLevelHistory[i].level);
+      float deviation = float(soundLevelHistory[i].level) - avgSoundLevel;
+      periodAvg += soundLevelHistory[i].level;
+      meanAbsDev += abs(deviation); // float(soundLevelHistory[i].level) > avgSoundLevel ? float(soundLevelHistory[i].level) - avgSoundLevel : avgSoundLevel - float(soundLevelHistory[i].level);
       ++nbSamples;
     }
   }
@@ -415,13 +420,25 @@ float soundLevelMeanAbsoluteDeviation(float avgSoundLevel, size_t from = 0, size
     return 0;
 
   meanAbsDev /= (float)nbSamples;
+  periodAvg /= (float)nbSamples;
+
+  Serial.print("Past 200ms sound level = ");
+  Serial.print(avgSoundLevel);
+  Serial.print(" ; deviation = ");
+  Serial.print(meanAbsDev);
+  Serial.print(" ; average = ");
+  Serial.println(periodAvg);
 
   return meanAbsDev;
 }
 
 
+void recordSoundLevel() {
+  int soundLevel = analogRead (MICROPHONE_PIN);
+  appendSoundLevel(millis(), soundLevel);  
+}
 
-void appendSoundLevel(size_t timeMs, int soundLevel) {
+void appendSoundLevel(unsigned long timeMs, int soundLevel) {
   soundLevelHistoryPos = ++soundLevelHistoryPos % _countof(soundLevelHistory);
   if (soundLevelHistoryCount < _countof(soundLevelHistory))
     ++soundLevelHistoryCount;
@@ -433,24 +450,37 @@ void appendSoundLevel(size_t timeMs, int soundLevel) {
   Serial.println(soundLevel);
 }
 
-bool hasClapped(size_t previousClapTime = 0) {
-  if (soundLevelHistoryCount == 0)
+bool hasClapped(unsigned long previousClapTime = 0) {
+  if (soundLevelHistoryCount == 0) {
+    Serial.println("History too short");
     return false;
+  }
   
-  const size_t CLAP_DURATION = 200;
+  const unsigned long CLAP_DURATION = 200;
 
   int lastSamplingTime = soundLevelHistory[soundLevelHistoryPos].timeMs;
-  if (lastSamplingTime - previousClapTime < (3*CLAP_DURATION))
+  if (lastSamplingTime - previousClapTime < (3*CLAP_DURATION)) {
+    Serial.println("Not enought time since last clap");
     return false; // not enough time elapsed since previous clap, ignore
+  }
 
-  // A clap lasts 200 ms, we compare the sound level from the latest 200 ms to the previous one
+  // A clap lasts 200 ms, we compare the sound level from the latest 200 ms to the average sound level
   float avgSoundLevel = soundLevelAverage(0, lastSamplingTime - CLAP_DURATION);
-  if (avgSoundLevel == 0)
+  if (avgSoundLevel == 0) {
+    Serial.println("Avg sound level = 0");
     return false; 
+  }
 
   float recentDeviationFromAvgSoundLevel = soundLevelMeanAbsoluteDeviation(avgSoundLevel, lastSamplingTime - CLAP_DURATION);
 
   return recentDeviationFromAvgSoundLevel > 1.0;
+}
+
+void clearSoundLevelHistory() {
+  soundLevelHistoryPos = -1;
+  soundLevelHistoryCount = 0;
+  lastClapDetectionTime = 0;
+  Serial.println("Sound level history cleared");
 }
 
 void loop() { 
@@ -461,8 +491,7 @@ void loop() {
     case kidsAwoken:
       {
         // When a big noise is detected (ex : a clap), play some random animations if the kids are awoken
-        int soundLevel = analogRead (MICROPHONE_PIN);
-        appendSoundLevel(millis(), soundLevel);
+        recordSoundLevel();
         bool clapped = hasClapped();
 
         if (clapped) {
@@ -490,6 +519,8 @@ void loop() {
             default:    
               playAnimation(blinkAnimation, _countof(blinkAnimation));
           }
+
+          clearSoundLevelHistory();
         } 
 
         if (clapped || stateChanged) {
